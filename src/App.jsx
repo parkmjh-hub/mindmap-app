@@ -51,7 +51,8 @@ export default function App() {
   });
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [verticalSpacing, setVerticalSpacing] = useState(50);
+  const [verticalSpacing, setVerticalSpacing] = useState(100);
+  const [horizontalSpacing, setHorizontalSpacing] = useState(150);
 
   // Canvas State
   const [nodes, setNodes] = useState([]);
@@ -206,17 +207,21 @@ export default function App() {
   }, [currentDocId]);
 
   // Layout processing
-  const triggerAutoLayout = useCallback((currentNodes, currentEdges, spacing = verticalSpacing) => {
+  const triggerAutoLayout = useCallback((currentNodes, currentEdges, vSpacing = verticalSpacing, hSpacing = horizontalSpacing) => {
     const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
-      currentNodes,
-      currentEdges,
-      'TB', // Top-Bottom layout
-      spacing
+      currentNodes, currentEdges, 'TB', vSpacing, hSpacing
     );
     setNodes([...layoutedNodes]);
     setEdges([...layoutedEdges]);
+    
+    // Smooth transition
+    if (rfInstance) {
+      setTimeout(() => {
+        rfInstance.fitView({ padding: 0.2, duration: 800 });
+      }, 0);
+    }
     return { layoutedNodes, layoutedEdges };
-  }, [verticalSpacing]);
+  }, [verticalSpacing, horizontalSpacing, rfInstance]);
 
   // Node Change Callbacks
   const onNodesChange = useCallback(
@@ -450,11 +455,41 @@ export default function App() {
   }, [nodes, edges, triggerAutoLayout, rfInstance, takeSnapshot]);
 
   const nodesWithData = useMemo(() => {
+    // 1. Calculate hierarchical labels based on tree structure and visual order
+    const labels = {};
+    
+    // Find all nodes that are roots (no incoming edges)
+    const rootNodes = nodes.filter(n => !edges.some(e => e.target === n.id));
+    // Sort roots primarily by Y position (top-down) then X (left-right)
+    rootNodes.sort((a, b) => (a.position.y - b.position.y) || (a.position.x - b.position.x));
+
+    const traverse = (nodeId, prefix) => {
+      labels[nodeId] = prefix;
+      
+      // Find children of this node
+      const children = edges
+        .filter(e => e.source === nodeId)
+        .map(e => nodes.find(n => n.id === e.target))
+        .filter(Boolean);
+      
+      // Sort children by horizontal position
+      children.sort((a, b) => (a.position.x - b.position.x) || (a.position.y - b.position.y));
+      
+      children.forEach((child, i) => {
+        traverse(child.id, `${prefix}.${i + 1}`);
+      });
+    };
+
+    rootNodes.forEach((root, i) => {
+      traverse(root.id, `${i + 1}`);
+    });
+
     return nodes.map((n) => ({
       ...n,
       draggable: !n.data?.isLocked,
       data: {
         ...n.data,
+        indexLabel: labels[n.id],
         onChangeLabel,
         onChangeColor,
         onAddChild,
@@ -463,7 +498,7 @@ export default function App() {
         onInsertAbove,
       },
     }));
-  }, [nodes, onChangeLabel, onChangeColor, onAddChild, safeOnDelete, onToggleLock, onInsertAbove]);
+  }, [nodes, edges, onChangeLabel, onChangeColor, onAddChild, safeOnDelete, onToggleLock, onInsertAbove]);
 
   // Document UI Actions
   const createNewDocument = () => {
@@ -495,7 +530,7 @@ export default function App() {
   };
 
   const handleManualRelayout = () => {
-    triggerAutoLayout(nodes, edges, verticalSpacing);
+    triggerAutoLayout(nodes, edges, verticalSpacing, horizontalSpacing);
     if (rfInstance) {
       setTimeout(() => {
          rfInstance.fitView({ duration: 800 });
@@ -503,10 +538,16 @@ export default function App() {
     }
   };
 
-  const handleSpacingChange = (delta) => {
-    const newSpacing = Math.max(20, Math.min(150, verticalSpacing + delta));
+  const handleVerticalSpacingChange = (delta) => {
+    const newSpacing = Math.max(20, Math.min(200, verticalSpacing + delta));
     setVerticalSpacing(newSpacing);
-    triggerAutoLayout(nodes, edges, newSpacing);
+    triggerAutoLayout(nodes, edges, newSpacing, horizontalSpacing);
+  };
+
+  const handleHorizontalSpacingChange = (delta) => {
+    const newSpacing = Math.max(0, Math.min(400, horizontalSpacing + delta));
+    setHorizontalSpacing(newSpacing);
+    triggerAutoLayout(nodes, edges, verticalSpacing, newSpacing);
   };
 
   const handleExportPDF = async () => {
@@ -800,9 +841,20 @@ export default function App() {
                 <button className="control-btn" onClick={() => rfInstance?.zoomOut({ duration: 300 })} title="Zoom Out">-</button>
               </div>
               <div className="control-group">
-                <button className="control-btn" onClick={() => handleSpacingChange(15)} title="Increase Spacing">+</button>
-                <span className="control-label">Spacing</span>
-                <button className="control-btn" onClick={() => handleSpacingChange(-15)} title="Decrease Spacing">-</button>
+                <button className="control-btn" onClick={() => handleVerticalSpacingChange(20)} title="Increase Vertical Spacing">+</button>
+                <div className="control-label-stack">
+                  <span className="control-label">Vertical</span>
+                  <span className="control-label">Spacing</span>
+                </div>
+                <button className="control-btn" onClick={() => handleVerticalSpacingChange(-20)} title="Decrease Vertical Spacing">-</button>
+              </div>
+              <div className="control-group">
+                <button className="control-btn" onClick={() => handleHorizontalSpacingChange(30)} title="Increase Horizontal Spacing">+</button>
+                <div className="control-label-stack">
+                  <span className="control-label">Horizontal</span>
+                  <span className="control-label">Spacing</span>
+                </div>
+                <button className="control-btn" onClick={() => handleHorizontalSpacingChange(-30)} title="Decrease Horizontal Spacing">-</button>
               </div>
             </Panel>
           </ReactFlow>

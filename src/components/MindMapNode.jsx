@@ -60,6 +60,11 @@ export default function MindMapNode({ id, data, selected }) {
       onDoubleClick={onDoubleClick}
       style={{ backgroundColor: bgColor, color: textColor }}
     >
+      {data.indexLabel && (
+        <div className="node-index-tag">
+          {data.indexLabel}
+        </div>
+      )}
       <Handle 
         type="target" 
         position={Position.Top} 

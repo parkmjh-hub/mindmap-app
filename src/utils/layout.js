@@ -1,47 +1,153 @@
 import dagre from 'dagre';
 
 // Calculate positions for nodes using dagre based on edges
-export const getLayoutedElements = (nodes, edges, direction = 'TB', verticalSpacing = 50) => {
+export const getLayoutedElements = (nodes, edges, direction = 'TB', verticalSpacing = 100, horizontalSpacing = 150) => {
   const dagreGraph = new dagre.graphlib.Graph();
   dagreGraph.setDefaultEdgeLabel(() => ({}));
-  // ranksep: vertical distance between nodes in TB layout
-  // nodesep: horizontal distance between nodes in TB layout
-  dagreGraph.setGraph({ rankdir: direction, nodesep: 40, edgesep: 30, ranksep: verticalSpacing });
+  dagreGraph.setGraph({ rankdir: direction, nodesep: horizontalSpacing, edgesep: 50, ranksep: verticalSpacing });
+
+  const nodeWidth = 160; // Reduced to match CSS min-width + padding for tightest possible layout
+  const nodeHeight = 60;  
+
+  // De-duplicate edges by source→target key
+  const edgeKey = (e) => `${e.source}→${e.target}`;
+  const seenEdges = new Set();
+  const uniqueEdges = edges.filter((e) => {
+    const key = edgeKey(e);
+    if (seenEdges.has(key)) return false;
+    seenEdges.add(key);
+    return true;
+  });
 
   // Map nodes to dagre
   nodes.forEach((node) => {
-    // Estimating average size of our `.custom-node` class
-    const width = 150;
-    const height = 50;
-    dagreGraph.setNode(node.id, { width, height });
+    dagreGraph.setNode(node.id, { width: nodeWidth, height: nodeHeight });
   });
 
   // Map edges to dagre
-  edges.forEach((edge) => {
+  uniqueEdges.forEach((edge) => {
     dagreGraph.setEdge(edge.source, edge.target);
   });
 
   // Calculate layout
   dagre.layout(dagreGraph);
 
+  // Build a map of dagre-computed positions
+  const dagrePositions = new Map();
+  nodes.forEach((node) => {
+    const pos = dagreGraph.node(node.id);
+    dagrePositions.set(node.id, { x: pos.x, y: pos.y });
+  });
+
+  // Build a map of the user's original x-positions (before layout)
+  const originalXMap = new Map(nodes.map((n) => [n.id, n.position?.x ?? 0]));
+
+  // Group children by parent so we can preserve sibling order
+  const childrenByParent = new Map();
+  uniqueEdges.forEach((edge) => {
+    if (!childrenByParent.has(edge.source)) {
+      childrenByParent.set(edge.source, []);
+    }
+    childrenByParent.get(edge.source).push(edge.target);
+  });
+
+  // Helper to get all descendants of a node in the dagre graph
+  const getAllDescendants = (nodeId) => {
+    const descendants = [];
+    const queue = [nodeId];
+    const visited = new Set([nodeId]);
+    while (queue.length > 0) {
+      const current = queue.shift();
+      const children = childrenByParent.get(current) || [];
+      for (const childId of children) {
+        if (!visited.has(childId)) {
+          visited.add(childId);
+          descendants.push(childId);
+          queue.push(childId);
+        }
+      }
+    }
+    return descendants;
+  };
+
+  // Process tree layer by layer to reorder siblings while shifting subtrees
+  // We use BFS to ensure we process parents before children
+  const roots = nodes.filter(n => !edges.some(e => e.target === n.id)).map(n => n.id);
+  const queue = [...roots];
+  const processedParents = new Set();
+
+  while (queue.length > 0) {
+    const parentId = queue.shift();
+    if (processedParents.has(parentId)) continue;
+    processedParents.add(parentId);
+
+    const childIds = childrenByParent.get(parentId) || [];
+    if (childIds.length <= 1) {
+      queue.push(...childIds);
+      continue;
+    }
+
+    // Detect if a node is brand-new (at origin, with isNew flag)
+    const isNewNode = (id) => {
+      const node = nodes.find(n => n.id === id);
+      return node?.position?.x === 0 && node?.position?.y === 0 && node?.data?.isNew;
+    };
+
+    // 1. Sort children by their current visual horizontal position
+    const sortedByUser = [...childIds].sort((a, b) => {
+      const aNew = isNewNode(a);
+      const bNew = isNewNode(b);
+      if (aNew && !bNew) return 1;
+      if (!aNew && bNew) return -1;
+      return (originalXMap.get(a) ?? 0) - (originalXMap.get(b) ?? 0);
+    });
+
+    // 2. Get the target x-slots that Dagre provided for this group
+    const dagreXSlots = childIds
+      .map(id => dagrePositions.get(id).x)
+      .sort((a, b) => a - b);
+
+    // 3. To avoid double-shifting or conflicting moves, we calculate all deltas first
+    const shifts = sortedByUser.map((id, i) => {
+      const currentDagreX = dagrePositions.get(id).x;
+      const targetX = dagreXSlots[i];
+      return { id, deltaX: targetX - currentDagreX };
+    });
+
+    // 4. Apply shifts to each sibling and its entire subtree
+    shifts.forEach(({ id, deltaX }) => {
+      if (Math.abs(deltaX) < 0.1) return; // Skip negligible shifts
+
+      // Shift the node itself
+      dagrePositions.get(id).x += deltaX;
+
+      // Shift all its descendants
+      const descendants = getAllDescendants(id);
+      descendants.forEach(descId => {
+        dagrePositions.get(descId).x += deltaX;
+      });
+    });
+
+    // Add children to queue for next level processing
+    queue.push(...childIds);
+  }
+
   // Apply layout back to our ReactFlow nodes
   const layoutedNodes = nodes.map((node) => {
-    const nodeWithPosition = dagreGraph.node(node.id);
-    
-    // We adjust by half width and height because dagre positions from center, 
-    // but React Flow positions from top-left.
+    const pos = dagrePositions.get(node.id);
     return {
       ...node,
       targetPosition: direction === 'LR' ? 'left' : 'top',
       sourcePosition: direction === 'LR' ? 'right' : 'bottom',
       position: {
-        x: nodeWithPosition.x - 75,
-        y: nodeWithPosition.y - 25,
+        x: pos.x - nodeWidth / 2,
+        y: pos.y - nodeHeight / 2,
       },
-      // When auto-layout is applied, we can make them visible by default
       style: { opacity: 1, ...node.style }
     };
   });
 
-  return { nodes: layoutedNodes, edges };
+  return { nodes: layoutedNodes, edges: uniqueEdges };
 };
+
+
