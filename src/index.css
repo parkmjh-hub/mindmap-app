@@ -405,6 +405,26 @@ body {
   top: -16px;
 }
 
+.node-top-center-actions {
+  position: absolute;
+  top: -12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--transition-fast), top var(--transition-fast);
+  z-index: 20;
+}
+
+.custom-node:hover .node-top-center-actions,
+.node-top-center-actions:hover,
+.custom-node.selected .node-top-center-actions {
+  opacity: 1;
+  pointer-events: auto;
+  top: -16px;
+}
+
 .node-btn {
   width: 24px;
   height: 24px;

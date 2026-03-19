@@ -12,7 +12,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { v4 as uuidv4 } from 'uuid';
-import { Network, LayoutDashboard, Menu, Plus, File, Trash2, Edit2, Undo2, Redo2, Printer, Sun, Moon } from 'lucide-react';
+import { Network, LayoutDashboard, Menu, Plus, File, Trash2, Edit2, Undo2, Redo2, Printer, Sun, Moon, Download, Upload } from 'lucide-react';
 import { toPng } from 'html-to-image';
 import { jsPDF } from 'jspdf';
 
@@ -31,6 +31,7 @@ const createDefaultNode = () => ({
 });
 
 export default function App() {
+  const fileInputRef = React.useRef(null);
   // Document Management State
   const [documents, setDocuments] = useState(() => {
     const saved = localStorage.getItem('mindmap-docs');
@@ -373,6 +374,81 @@ export default function App() {
     );
   }, [takeSnapshot]);
 
+  const onInsertAbove = useCallback((childId) => {
+    if (childId === 'root') return;
+    takeSnapshot();
+
+    // Compute everything from current state upfront (no nesting)
+    const parentEdge = edges.find(e => e.target === childId);
+    if (!parentEdge) return;
+
+    console.log('[DEBUG] === INSERT ABOVE ===');
+    console.log('[DEBUG] childId:', childId);
+    console.log('[DEBUG] parentEdge to remove:', parentEdge.id, parentEdge);
+    console.log('[DEBUG] all edges BEFORE:', edges.map(e => `${e.id} (${e.source}->${e.target})`));
+
+    const parentId = parentEdge.source;
+    const newNodeId = uuidv4();
+
+    // Place new node at midpoint between parent and child
+    const parentNode = nodes.find(n => n.id === parentId);
+    const childNode = nodes.find(n => n.id === childId);
+    const midX = ((parentNode?.position.x ?? 0) + (childNode?.position.x ?? 0)) / 2;
+    const midY = ((parentNode?.position.y ?? 0) + (childNode?.position.y ?? 0)) / 2;
+
+    const newNode = {
+      id: newNodeId,
+      type: 'mindmap',
+      data: { label: '', isNew: true },
+      position: { x: midX, y: midY },
+    };
+
+    // Inherit style from the original edge
+    const edgeStyle = parentEdge.style || { stroke: '#58a6ff', strokeWidth: 2 };
+    const edgeAnimated = parentEdge.animated ?? true;
+
+    // Build new edges: remove old parent->child, add parent->new and new->child
+    const nextEdges = edges.filter(e => e.id !== parentEdge.id).concat([
+      {
+        id: `e-${parentId}-${newNodeId}`,
+        source: parentId,
+        target: newNodeId,
+        animated: edgeAnimated,
+        style: { ...edgeStyle },
+      },
+      {
+        id: `e-${newNodeId}-${childId}`,
+        source: newNodeId,
+        target: childId,
+        animated: edgeAnimated,
+        style: { ...edgeStyle },
+      },
+    ]);
+
+    console.log('[DEBUG] all edges AFTER:', nextEdges.map(e => `${e.id} (${e.source}->${e.target})`));
+    console.log('[DEBUG] old edge still present?', nextEdges.some(e => e.id === parentEdge.id));
+
+    const nextNodes = [...nodes, newNode];
+
+    // Set both state at once
+    setNodes(nextNodes);
+    setEdges(nextEdges);
+
+    // Then trigger layout
+    setTimeout(() => {
+      console.log('[DEBUG] triggerAutoLayout with edges:', nextEdges.map(e => `${e.id} (${e.source}->${e.target})`));
+      const { layoutedNodes } = triggerAutoLayout(nextNodes, nextEdges);
+      const newlyLayouted = layoutedNodes.find(n => n.id === newNodeId);
+      if (rfInstance && newlyLayouted) {
+        setTimeout(() => {
+          const currentZoom = rfInstance.getZoom();
+          const targetZoom = Math.max(currentZoom, 1.2);
+          rfInstance.setCenter(newlyLayouted.position.x + 75, newlyLayouted.position.y + 25, { duration: 800, zoom: targetZoom });
+        }, 50);
+      }
+    }, 0);
+  }, [nodes, edges, triggerAutoLayout, rfInstance, takeSnapshot]);
+
   const nodesWithData = useMemo(() => {
     return nodes.map((n) => ({
       ...n,
@@ -384,9 +460,10 @@ export default function App() {
         onAddChild,
         onDelete: safeOnDelete,
         onToggleLock,
+        onInsertAbove,
       },
     }));
-  }, [nodes, onChangeLabel, onChangeColor, onAddChild, safeOnDelete, onToggleLock]);
+  }, [nodes, onChangeLabel, onChangeColor, onAddChild, safeOnDelete, onToggleLock, onInsertAbove]);
 
   // Document UI Actions
   const createNewDocument = () => {
@@ -495,6 +572,113 @@ export default function App() {
     }
   };
 
+  const handleExportAll = () => {
+    try {
+      // Strip non-serializable callback functions from nodes before export
+      const cleanNodes = (nodeList) => {
+        return nodeList.map(node => ({
+          ...node,
+          data: Object.fromEntries(
+            Object.entries(node.data || {}).filter(([, v]) => typeof v !== 'function')
+          ),
+        }));
+      };
+
+      const exportData = {
+        version: 1,
+        documents: documents,
+        data: {}
+      };
+      
+      documents.forEach(doc => {
+        const docData = localStorage.getItem(`mindmap-data-${doc.id}`);
+        if (docData) {
+          try {
+            const parsed = JSON.parse(docData);
+            exportData.data[doc.id] = {
+              nodes: cleanNodes(parsed.nodes || []),
+              edges: parsed.edges || [],
+            };
+          } catch (parseErr) {
+            // Skip corrupt data
+          }
+        }
+      });
+      
+      // Also add current in-memory data for the active document (most up-to-date)
+      exportData.data[currentDocId] = { nodes: cleanNodes(nodes), edges: edges };
+
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `mindmaps-backup-${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to export all diagrams:', err);
+      alert('Failed to export diagrams.');
+    }
+  };
+
+  const handleImportAll = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const content = e.target.result;
+        const imported = JSON.parse(content);
+        
+        if (!imported.documents || !Array.isArray(imported.documents) || !imported.data) {
+          throw new Error('Invalid file format. Missing documents or data.');
+        }
+
+        // Merge documents
+        const newDocsMap = new Map();
+        documents.forEach(d => newDocsMap.set(d.id, d));
+        
+        imported.documents.forEach(d => {
+            newDocsMap.set(d.id, d); // Overwrite or add
+        });
+
+        const mergedDocs = Array.from(newDocsMap.values());
+        
+        // Save data to localStorage
+        Object.keys(imported.data).forEach(docId => {
+            localStorage.setItem(`mindmap-data-${docId}`, JSON.stringify(imported.data[docId]));
+        });
+
+        // Update documents list in localStorage
+        localStorage.setItem('mindmap-docs', JSON.stringify(mergedDocs));
+
+        // Update state
+        setDocuments(mergedDocs);
+        
+        // Force reload of the current document's canvas data from localStorage
+        const currentData = imported.data[currentDocId];
+        if (currentData) {
+          setNodes(currentData.nodes || [createDefaultNode()]);
+          setEdges(currentData.edges || []);
+        }
+        
+        // Clear input so same file can be imported again
+        if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+        }
+        
+        alert('Diagrams imported successfully!');
+      } catch (err) {
+        console.error('Failed to import diagrams:', err);
+        alert('Failed to import diagrams. The file might be corrupted or in an incompatible format.');
+      }
+    };
+    reader.readAsText(file);
+  };
+
   return (
     <div className="app-container">
       {/* Sidebar */}
@@ -572,6 +756,20 @@ export default function App() {
           </button>
           <button className="btn-icon" onClick={handleManualRelayout} title="Auto Layout">
             <LayoutDashboard size={20} />
+          </button>
+          <div className="toolbar-divider"></div>
+          <input 
+            type="file" 
+            accept=".json" 
+            style={{ display: 'none' }} 
+            ref={fileInputRef} 
+            onChange={handleImportAll} 
+          />
+          <button className="btn-icon" onClick={handleExportAll} title="Export All Diagrams">
+            <Upload size={20} />
+          </button>
+          <button className="btn-icon" onClick={() => fileInputRef.current?.click()} title="Import Diagrams">
+            <Download size={20} />
           </button>
           <div className="toolbar-divider"></div>
           <button className="btn-icon" onClick={() => setIsDarkMode(!isDarkMode)} title={isDarkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}>

@@ -114,6 +114,24 @@ export default function MindMapNode({ id, data, selected }) {
         </button>
       </div>
 
+      {/* Hover action button (Top Center - Insert Above) */}
+      {id !== 'root' && (
+        <div className="node-top-center-actions" onClick={(e) => e.stopPropagation()}>
+          <button 
+            className="node-btn" 
+            title="Insert Node Above"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              data.onInsertAbove?.(id);
+            }}
+          >
+            <Plus size={14} />
+          </button>
+        </div>
+      )}
+
       {/* Hover action buttons */}
       <div className="node-actions" onClick={(e) => e.stopPropagation()}>
         <button 

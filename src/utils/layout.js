@@ -1,10 +1,9 @@
 import dagre from 'dagre';
 
-const dagreGraph = new dagre.graphlib.Graph();
-dagreGraph.setDefaultEdgeLabel(() => ({}));
-
 // Calculate positions for nodes using dagre based on edges
 export const getLayoutedElements = (nodes, edges, direction = 'TB', verticalSpacing = 50) => {
+  const dagreGraph = new dagre.graphlib.Graph();
+  dagreGraph.setDefaultEdgeLabel(() => ({}));
   // ranksep: vertical distance between nodes in TB layout
   // nodesep: horizontal distance between nodes in TB layout
   dagreGraph.setGraph({ rankdir: direction, nodesep: 40, edgesep: 30, ranksep: verticalSpacing });
