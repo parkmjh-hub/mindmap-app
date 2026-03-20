@@ -15,16 +15,28 @@ export default function MindMapNode({ id, data, selected }) {
 
   useEffect(() => {
     if (isEditing && inputRef.current) {
-      // Delay focus to ensure all ReactFlow transitions, state updates, and panning finish
+      // Delay focus and auto-resize to ensure all ReactFlow transitions, state updates, and panning finish
       const timer = setTimeout(() => {
         if (inputRef.current) {
           inputRef.current.focus({ preventScroll: true });
           inputRef.current.select();
+          // Initial resize
+          if (inputRef.current) {
+            inputRef.current.style.height = 'auto';
+            inputRef.current.style.height = `${inputRef.current.scrollHeight}px`;
+          }
         }
       }, 150);
       return () => clearTimeout(timer);
     }
   }, [isEditing]);
+
+  const autoResize = () => {
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto';
+      inputRef.current.style.height = `${inputRef.current.scrollHeight}px`;
+    }
+  };
 
   const onDoubleClick = () => {
     setIsEditing(true);
@@ -32,6 +44,7 @@ export default function MindMapNode({ id, data, selected }) {
 
   const onChange = (evt) => {
     setLabel(evt.target.value);
+    autoResize();
   };
 
   const onBlur = () => {
@@ -46,9 +59,12 @@ export default function MindMapNode({ id, data, selected }) {
   };
 
   const onKeyDown = (evt) => {
-    if (evt.key === 'Enter') {
+    // If user presses Enter without Shift, save and exit
+    if (evt.key === 'Enter' && !evt.shiftKey) {
+      evt.preventDefault();
       onBlur();
     }
+    // Shift+Enter will naturally create a newline in a textarea
   };
 
   const isRoot = id === 'root';
@@ -78,16 +94,17 @@ export default function MindMapNode({ id, data, selected }) {
       />
       
       {isEditing ? (
-        <input
+        <textarea
           ref={inputRef}
           value={label}
           onChange={onChange}
           onBlur={onBlur}
           onKeyDown={onKeyDown}
           className="node-input"
+          rows={1}
         />
       ) : (
-        <div>{label || 'New Node'}</div>
+        <div style={{ whiteSpace: 'pre-wrap' }}>{label || 'New Node'}</div>
       )}
 
       {/* Hover action buttons (Left Color Palette) */}

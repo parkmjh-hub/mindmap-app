@@ -487,6 +487,12 @@ body {
   text-align: center;
   width: 100%;
   outline: none;
+  resize: none;
+  overflow: hidden;
+  display: block;
+  line-height: inherit;
+  padding: 0;
+  margin: 0;
 }
 
 .node-input::selection {
