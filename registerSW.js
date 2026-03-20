@@ -1,0 +1,1 @@
+if('serviceWorker' in navigator) {window.addEventListener('load', () => {navigator.serviceWorker.register('/mindmap-app/sw.js', { scope: '/mindmap-app/' })})}
