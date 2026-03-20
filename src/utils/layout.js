@@ -132,6 +132,52 @@ export const getLayoutedElements = (nodes, edges, direction = 'TB', verticalSpac
     queue.push(...childIds);
   }
 
+  // Final Pass: Respect Node Locks
+  // We must process these TOP-DOWN (parents before children) so that parent shifts
+  // are applied to children BEFORE we calculate the child's own required lock shift.
+  const originalPositions = new Map(nodes.map((n) => [n.id, { x: n.position?.x ?? 0, y: n.position?.y ?? 0 }]));
+  const rootsForLock = nodes.filter(n => !uniqueEdges.some(e => e.target === n.id)).map(n => n.id);
+  const lockQueue = [...rootsForLock];
+  const processedForLock = new Set();
+
+  while (lockQueue.length > 0) {
+    const id = lockQueue.shift();
+    if (processedForLock.has(id)) continue;
+    processedForLock.add(id);
+
+    const node = nodes.find(n => n.id === id);
+    if (node?.data?.isLocked) {
+      const originalPos = originalPositions.get(id);
+      const currentDagrePos = dagrePositions.get(id);
+      
+      const currentTopLeftX = currentDagrePos.x - nodeWidth / 2;
+      const currentTopLeftY = currentDagrePos.y - nodeHeight / 2;
+      
+      const dx = originalPos.x - currentTopLeftX;
+      const dy = originalPos.y - currentTopLeftY;
+      
+      if (Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1) {
+        // Shift the node itself
+        currentDagrePos.x += dx;
+        currentDagrePos.y += dy;
+        
+        // Shift all its descendants
+        const descendants = getAllDescendants(id);
+        descendants.forEach(descId => {
+          const dPos = dagrePositions.get(descId);
+          if (dPos) {
+            dPos.x += dx;
+            dPos.y += dy;
+          }
+        });
+      }
+    }
+    
+    // Add children to queue
+    const children = childrenByParent.get(id) || [];
+    lockQueue.push(...children);
+  }
+
   // Apply layout back to our ReactFlow nodes
   const layoutedNodes = nodes.map((node) => {
     const pos = dagrePositions.get(node.id);

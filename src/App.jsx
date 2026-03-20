@@ -30,6 +30,48 @@ const createDefaultNode = () => ({
   position: { x: 0, y: 0 },
 });
 
+const getWelcomeDiagram = () => {
+  const rootId = 'root';
+  const child1Id = uuidv4();
+  const child2Id = uuidv4();
+  const grandchildId = uuidv4();
+
+  const nodes = [
+    {
+      id: rootId,
+      type: 'mindmap',
+      data: { label: 'Welcome to Mindmap! 🚀 ' },
+      position: { x: 0, y: 0 },
+    },
+    {
+      id: child1Id,
+      type: 'mindmap',
+      data: { label: 'Double click to edit any node ✍️' },
+      position: { x: -200, y: 150 },
+    },
+    {
+      id: child2Id,
+      type: 'mindmap',
+      data: { label: 'Click [+] or hover for actions 🪄' },
+      position: { x: 200, y: 150 },
+    },
+    {
+      id: grandchildId,
+      type: 'mindmap',
+      data: { label: 'Drag nodes to reorganize! ↔️' },
+      position: { x: 200, y: 300 },
+    },
+  ];
+
+  const edges = [
+    { id: `e-${rootId}-${child1Id}`, source: rootId, target: child1Id, animated: true, style: { stroke: '#58a6ff', strokeWidth: 2 } },
+    { id: `e-${rootId}-${child2Id}`, source: rootId, target: child2Id, animated: true, style: { stroke: '#58a6ff', strokeWidth: 2 } },
+    { id: `e-${child2Id}-${grandchildId}`, source: child2Id, target: grandchildId, animated: true, style: { stroke: '#58a6ff', strokeWidth: 2 } },
+  ];
+
+  return { nodes, edges };
+};
+
 export default function App() {
   const fileInputRef = React.useRef(null);
   // Document Management State
@@ -42,7 +84,8 @@ export default function App() {
         // Fallback for corrupt data
       }
     }
-    return [{ id: uuidv4(), title: 'Untitled Map', updatedAt: Date.now() }];
+    const welcomeDocId = uuidv4();
+    return [{ id: welcomeDocId, title: 'Welcome Map 👋', updatedAt: Date.now() }];
   });
 
   const [currentDocId, setCurrentDocId] = useState(() => {
@@ -72,6 +115,7 @@ export default function App() {
   const [isLoaded, setIsLoaded] = useState(false);
   const loadedDocIdRef = React.useRef(currentDocId);
   const [rfInstance, setRfInstance] = useState(null);
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
 
   const currentDoc = useMemo(() => documents.find(d => d.id === currentDocId) || documents[0], [documents, currentDocId]);
 
@@ -193,8 +237,16 @@ export default function App() {
           setEdges([]);
         }
       } else {
-        setNodes([createDefaultNode()]);
-        setEdges([]);
+        // Check if this is the welcome doc
+        const isWelcome = documents.find(d => d.id === currentDocId)?.title.includes('Welcome Map');
+        if (isWelcome) {
+           const { nodes: wNodes, edges: wEdges } = getWelcomeDiagram();
+           setNodes(wNodes);
+           setEdges(wEdges);
+        } else {
+           setNodes([createDefaultNode()]);
+           setEdges([]);
+        }
       }
       
       // Clear history when loading a new document
@@ -223,34 +275,70 @@ export default function App() {
     return { layoutedNodes, layoutedEdges };
   }, [verticalSpacing, horizontalSpacing, rfInstance]);
 
+  const getSubtreeIds = useCallback((id, allEdges) => {
+    const ids = new Set([id]);
+    let queue = [id];
+    while (queue.length > 0) {
+      const current = queue.shift();
+      const children = allEdges.filter(e => e.source === current).map(e => e.target);
+      for (const child of children) {
+        if (!ids.has(child)) {
+          ids.add(child);
+          queue.push(child);
+        }
+      }
+    }
+    return ids;
+  }, []);
+
   // Node Change Callbacks
   const onNodesChange = useCallback(
     (changes) => {
       setNodes((nds) => {
-        let isDragChange = false;
+        const extraChanges = [];
         
-        // Intercept dragging changes to force horizontal-only movement
-        const adjustedChanges = changes.map(change => {
-            if (change.type === 'position' && change.position) {
-               isDragChange = true;
-               const node = nds.find(n => n.id === change.id);
-               if (node) {
-                   // Keep the new X, but snap Y back to the original Y
-                   return { ...change, position: { x: change.position.x, y: node.position.y } };
-               }
+        // Check for dragging changes to move subtrees
+        changes.forEach(change => {
+          if (change.type === 'position' && change.position && change.dragging) {
+            const node = nds.find(n => n.id === change.id);
+            if (node) {
+              const dx = change.position.x - node.position.x;
+              const dy = change.position.y - node.position.y;
+              
+              // Only move if there is a real change
+              if (dx !== 0 || dy !== 0) {
+                const subtreeIds = getSubtreeIds(node.id, edges);
+                subtreeIds.delete(node.id);
+                
+                subtreeIds.forEach(childId => {
+                  // To avoid double-moving if a child is also in the changes list, 
+                  // we could check if childId is in changes, but usually only one node is dragged in mindmap
+                  const childNode = nds.find(n => n.id === childId);
+                  if (childNode) {
+                    extraChanges.push({
+                      id: childId,
+                      type: 'position',
+                      position: {
+                        x: childNode.position.x + dx,
+                        y: childNode.position.y + dy
+                      },
+                      dragging: true,
+                    });
+                  }
+                });
+              }
             }
-            return change;
+          }
         });
 
-        // We only take a snapshot on drag end to avoid capturing every tiny pixel move
-        // However, React Flow's onNodesChange fires frequently during drag. 
-        // A better place for drag snapshots is onNodeDragStop, but for simplicity, 
-        // we will only snapshot explicit add/delete/edit/connect actions for now.
-        
-        return applyNodeChanges(adjustedChanges, nds);
+        // Intercept dragging changes
+        const allChanges = [...changes, ...extraChanges];
+        // We no longer snap Y because the user might want to reposition branches vertically, 
+        // and Auto Layout will handle the global tree structure.
+        return applyNodeChanges(allChanges, nds);
       });
     },
-    []
+    [edges, getSubtreeIds]
   );
 
   const onEdgesChange = useCallback(
@@ -292,21 +380,6 @@ export default function App() {
     );
   }, [takeSnapshot]);
 
-  const getSubtreeIds = useCallback((id, allEdges) => {
-    const ids = new Set([id]);
-    let queue = [id];
-    while (queue.length > 0) {
-      const current = queue.shift();
-      const children = allEdges.filter(e => e.source === current).map(e => e.target);
-      for (const child of children) {
-        if (!ids.has(child)) {
-          ids.add(child);
-          queue.push(child);
-        }
-      }
-    }
-    return ids;
-  }, []);
 
   const onAddChild = useCallback((parentId) => {
     takeSnapshot();
@@ -812,6 +885,9 @@ export default function App() {
           <button className="btn-icon" onClick={() => fileInputRef.current?.click()} title="Import Diagrams">
             <Download size={20} />
           </button>
+          <button className="btn-icon" onClick={() => setIsHelpOpen(true)} title="Quick Help">
+            <Plus size={20} style={{ transform: 'rotate(45deg)' }} />
+          </button>
           <div className="toolbar-divider"></div>
           <button className="btn-icon" onClick={() => setIsDarkMode(!isDarkMode)} title={isDarkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}>
             {isDarkMode ? <Sun size={20} /> : <Moon size={20} />}
@@ -859,6 +935,36 @@ export default function App() {
             </Panel>
           </ReactFlow>
         )}
+      {/* Help Modal */}
+      {isHelpOpen && (
+        <div className="help-overlay" onClick={() => setIsHelpOpen(false)}>
+          <div className="help-modal glass-panel" onClick={e => e.stopPropagation()}>
+            <h3>Quick Guide 💡</h3>
+            <div className="help-content">
+              <div className="help-section">
+                <h4>Mouse Controls</h4>
+                <ul>
+                  <li><strong>Double Click:</strong> Edit node text</li>
+                  <li><strong>Click [+]:</strong> Add child node</li>
+                  <li><strong>Hover:</strong> Show colors, delete & lock</li>
+                  <li><strong>Drag:</strong> Move nodes (locked nodes stay put!)</li>
+                  <li><strong>Scroll / Pinch:</strong> Zoom & Pan</li>
+                </ul>
+              </div>
+              <div className="help-section">
+                <h4>Shortcuts</h4>
+                <ul>
+                  <li><strong>Cmd/Ctrl + Z:</strong> Undo</li>
+                  <li><strong>Cmd/Ctrl + Shift + Z:</strong> Redo</li>
+                  <li><strong>Enter:</strong> Save label (while editing)</li>
+                  <li><strong>Esc:</strong> Close help</li>
+                </ul>
+              </div>
+            </div>
+            <button className="btn-primary" onClick={() => setIsHelpOpen(false)}>Got it!</button>
+          </div>
+        </div>
+      )}
       </div>
     </div>
   );

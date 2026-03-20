@@ -51,14 +51,19 @@ export default function MindMapNode({ id, data, selected }) {
     }
   };
 
-  const bgColor = data.color || '#1D2432';
-  const textColor = bgColor === '#1D2432' ? '#f0f6fc' : '#000000';
+  const isRoot = id === 'root';
+  const bgColor = data.color || (isRoot ? '#3b82f6' : '#1D2432');
+  const textColor = (bgColor === '#1D2432' || bgColor === '#3b82f6') ? '#f0f6fc' : '#000000';
 
   return (
     <div 
-      className={`custom-node ${selected ? 'selected' : ''}`} 
+      className={`custom-node ${selected ? 'selected' : ''} ${isRoot ? 'node-root' : ''}`} 
       onDoubleClick={onDoubleClick}
-      style={{ backgroundColor: bgColor, color: textColor }}
+      style={{ 
+        backgroundColor: bgColor, 
+        color: textColor,
+        background: isRoot && !data.color ? 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)' : bgColor
+      }}
     >
       {data.indexLabel && (
         <div className="node-index-tag">
