@@ -68,8 +68,8 @@ export default function MindMapNode({ id, data, selected }) {
   };
 
   const isRoot = id === 'root';
-  const bgColor = data.color || (isRoot ? '#3b82f6' : '#1D2432');
-  const textColor = (bgColor === '#1D2432' || bgColor === '#3b82f6') ? '#f0f6fc' : '#000000';
+  const bgColor = data.color || (isRoot ? '#000000' : '#1D2432');
+  const textColor = (bgColor === '#1D2432' || bgColor === '#000000') ? '#f0f6fc' : '#000000';
 
   return (
     <div 
@@ -78,7 +78,7 @@ export default function MindMapNode({ id, data, selected }) {
       style={{ 
         backgroundColor: bgColor, 
         color: textColor,
-        background: isRoot && !data.color ? 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)' : bgColor
+        background: isRoot && !data.color ? 'linear-gradient(135deg, #1D2432 0%, #000000 100%)' : bgColor
       }}
     >
       {data.indexLabel && (

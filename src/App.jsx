@@ -12,7 +12,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { v4 as uuidv4 } from 'uuid';
-import { Network, LayoutDashboard, Menu, Plus, File, Trash2, Edit2, Undo2, Redo2, Printer, Sun, Moon, Download, Upload } from 'lucide-react';
+import { Network, LayoutDashboard, Menu, Plus, File, Trash2, Edit2, Undo2, Redo2, Printer, Sun, Moon, Download, Upload, Lock, Unlock } from 'lucide-react';
 import { toPng } from 'html-to-image';
 import { jsPDF } from 'jspdf';
 
@@ -452,6 +452,21 @@ export default function App() {
     );
   }, [takeSnapshot]);
 
+  const areAllLocked = useMemo(() => 
+    nodes.length > 0 && nodes.every(n => n.data?.isLocked), 
+    [nodes]
+  );
+
+  const onToggleAllLock = useCallback(() => {
+    takeSnapshot();
+    const targetState = !areAllLocked;
+    setNodes(nds => nds.map(node => ({
+      ...node,
+      draggable: !targetState,
+      data: { ...node.data, isLocked: targetState }
+    })));
+  }, [areAllLocked, takeSnapshot]);
+
   const onInsertAbove = useCallback((childId) => {
     if (childId === 'root') return;
     takeSnapshot();
@@ -870,6 +885,14 @@ export default function App() {
           </button>
           <button className="btn-icon" onClick={handleManualRelayout} title="Auto Layout">
             <LayoutDashboard size={20} />
+          </button>
+          <button 
+            className="btn-icon" 
+            onClick={onToggleAllLock} 
+            title={areAllLocked ? "Unlock All Nodes" : "Lock All Nodes"}
+            disabled={nodes.length === 0}
+          >
+            {areAllLocked ? <Unlock size={20} /> : <Lock size={20} />}
           </button>
           <div className="toolbar-divider"></div>
           <input 
